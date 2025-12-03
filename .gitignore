@@ -214,3 +214,5 @@ subgraph_extraction/output_体质辨识 copy.json
 old_files
 cold_start/relation_path_dataset.json
 cold_start/rag_cold_start_dataset.json
+evaluation_results_with_reasoning.json
+test_single_sample_result.json

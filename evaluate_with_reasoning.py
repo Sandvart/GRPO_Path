@@ -17,8 +17,16 @@ class FreebaseRetriever:
         self.sparql = SPARQLWrapper(sparql_endpoint)
         self.sparql.setReturnFormat(JSON)
     
-    def get_entity_uris(self, entity_name: str, limit: int = 10) -> List[str]:
-        """根据实体名称获取所有可能的URI"""
+    def get_entity_uris(self, entity_name: str, limit: int = 50) -> List[str]:
+        """根据实体名称获取所有可能的URI
+        
+        Args:
+            entity_name: 实体的规范名称
+            limit: 返回URI的最大数量，默认50（增加以提高召回率）
+        
+        Returns:
+            实体URI列表
+        """
         query = f"""PREFIX ns: <http://rdf.freebase.com/ns/>
             SELECT DISTINCT ?entity
             WHERE {{
@@ -184,7 +192,7 @@ class FreebaseRetriever:
             return []
         
         print(f"  ✓ 找到 {len(entity_uris)} 个可能的URI for '{start_entity}'")
-        for i, uri in enumerate(entity_uris[:3]):  # 只显示前3个
+        for i, uri in enumerate(entity_uris[:50]):  # 只显示前50个
             print(f"    URI {i+1}: {uri}")
         
         all_paths = []
@@ -324,18 +332,19 @@ class ModelEvaluator:
         # 构建包含推理路径的提示词
         paths_text = self.format_reasoning_paths(reasoning_paths)
         
-        prompt = f"""Based on the following reasoning paths from the knowledge graph, please answer the question.
+        prompt = f"""Please answer the following question by integrating the reasoning paths from the knowledge graph with your own knowledge.
 
 Question: {question}
 
-Reasoning Paths:
+Reasoning Paths from Knowledge Graph:
 {paths_text}
 
 Instructions:
-1. Analyze the reasoning paths carefully
-2. Extract relevant information to answer the question
-3. Provide a concise and accurate answer
-4. If multiple entities satisfy the answer, list them all
+1. If reasoning paths are available, carefully analyze them and extract relevant information
+2. Combine the information from reasoning paths with your own knowledge to provide a comprehensive answer
+3. Even if no reasoning paths are found or the paths are incomplete, still attempt to answer the question using your knowledge
+4. Provide a concise and accurate answer based on all available information
+5. If multiple entities satisfy the answer, list them all
 
 Answer:"""
         
@@ -434,6 +443,7 @@ Note: Output JSON only, no additional text."""
         results = []
         hits = 0
         total_f1 = 0.0
+        questions_with_paths = 0  # 记录检索到推理路径的问题数量
         
         for idx, sample in enumerate(tqdm(samples, desc="评测进度")):
             question = sample['question']
@@ -464,6 +474,10 @@ Note: Output JSON only, no additional text."""
                 relation_paths_dict
             )
             print(f"\n总共检索到 {len(retrieved_paths)} 条完整推理路径")
+            
+            # 统计是否检索到推理路径
+            if len(retrieved_paths) > 0:
+                questions_with_paths += 1
             
             # 显示检索到的推理路径详情
             if retrieved_paths:
@@ -516,10 +530,13 @@ Note: Output JSON only, no additional text."""
         # 计算总体指标
         hit_rate = hits / len(samples) if samples else 0
         avg_f1 = total_f1 / len(samples) if samples else 0
+        path_retrieval_rate = questions_with_paths / len(samples) if samples else 0
         
         print(f"\n{'='*80}")
         print("评测结果汇总:")
         print(f"总样本数: {len(samples)}")
+        print(f"检索到推理路径的问题数: {questions_with_paths}")
+        print(f"推理路径检索率: {path_retrieval_rate:.4f} ({path_retrieval_rate*100:.2f}%)")
         print(f"命中数: {hits}")
         print(f"命中率: {hit_rate:.4f} ({hit_rate*100:.2f}%)")
         print(f"平均F1分数: {avg_f1:.4f}")
@@ -528,6 +545,8 @@ Note: Output JSON only, no additional text."""
         return {
             'summary': {
                 'total_samples': len(samples),
+                'questions_with_paths': questions_with_paths,
+                'path_retrieval_rate': path_retrieval_rate,
                 'hits': hits,
                 'hit_rate': hit_rate,
                 'average_f1': avg_f1
@@ -562,21 +581,41 @@ Note: Output JSON only, no additional text."""
     
     @staticmethod
     def eval_f1(prediction: List[str], answer: List[str]) -> Tuple[float, float, float]:
-        """计算F1分数"""
-        if len(prediction) == 0:
-            return 0, 0, 0
+        """计算F1分数
         
-        matched = 0
+        Args:
+            prediction: 预测答案列表（每个元素是一个预测的答案字符串）
+            answer: 标准答案列表
+        
+        Returns:
+            (f1, precision, recall)
+        """
+        if len(prediction) == 0:
+            return 0.0, 0.0, 0.0
+        
+        # 计算预测中有多少个答案被匹配到
+        matched_predictions = 0
         prediction_str = ' '.join(prediction)
+        for pred in prediction:
+            for a in answer:
+                if ModelEvaluator.match(pred, a):
+                    matched_predictions += 1
+                    break  # 一个预测只计数一次
+        
+        # 计算标准答案中有多少个被预测覆盖
+        matched_answers = 0
         for a in answer:
             if ModelEvaluator.match(prediction_str, a):
-                matched += 1
+                matched_answers += 1
         
-        precision = matched / len(prediction)
-        recall = matched / len(answer)
+        # 精确率 = 预测中正确的数量 / 预测总数
+        precision = matched_predictions / len(prediction) if len(prediction) > 0 else 0.0
+        # 召回率 = 标准答案中被覆盖的数量 / 标准答案总数
+        recall = matched_answers / len(answer) if len(answer) > 0 else 0.0
         
+        # F1分数
         if precision + recall == 0:
-            return 0, precision, recall
+            return 0.0, precision, recall
         else:
             f1 = 2 * precision * recall / (precision + recall)
             return f1, precision, recall
@@ -595,7 +634,7 @@ def main():
     ANSWER_MODEL = "qwen-turbo"  # 用于生成最终答案的模型
     
     TEST_FILE = "datasets/webqsp/test.json"
-    NUM_SAMPLES = 10
+    NUM_SAMPLES = 100
     OUTPUT_FILE = "evaluation_results_with_reasoning.json"
     
     # 设置随机种子
