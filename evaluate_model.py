@@ -4,7 +4,11 @@ import os
 import re
 import string
 from openai import OpenAI
-from typing import List, Tuple
+from SPARQLWrapper import SPARQLWrapper, JSON
+from typing import List, Tuple, Dict
+from tqdm import tqdm
+
+SPARQLPATH = "http://10.201.173.146:3001/sparql"
 
 def load_test_samples(file_path: str, num_samples: int = 10) -> List[dict]:
     """从test.json中随机加载指定数量的样本"""
