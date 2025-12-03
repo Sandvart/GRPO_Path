@@ -284,7 +284,13 @@ class ModelEvaluator:
                     {"role": "system", "content": "You are a helpful assistant specialized in knowledge graph reasoning."},
                     {"role": "user", "content": f"{instruction}\n\nQuestion: {question}"}
                 ],
-                temperature=0.3,
+                temperature=0.7,
+                top_p=0.8,
+                presence_penalty=1.5,
+                extra_body={
+                    "top_k": 20,
+                    "chat_template_kwargs": {"enable_thinking": False},
+                },
             )
             
             response = completion.choices[0].message.content
@@ -340,7 +346,13 @@ Answer:"""
                     {"role": "system", "content": "You are a helpful assistant. Answer questions based on the provided knowledge graph reasoning paths."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.3,
+                temperature=0.7,
+                top_p=0.8,
+                presence_penalty=1.5,
+                extra_body={
+                    "top_k": 20,
+                    "chat_template_kwargs": {"enable_thinking": False},
+                },
             )
             
             return completion.choices[0].message.content.strip()
