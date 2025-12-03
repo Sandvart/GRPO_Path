@@ -21,7 +21,7 @@ from SPARQLWrapper import SPARQLWrapper, JSON as SPARQL_JSON
 from importlib.util import find_spec
 
 # 环境配置
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
 os.environ["NCCL_P2P_DISABLE"] = "1"
 os.environ["NCCL_IB_DISABLE"] = "1"
 
@@ -173,8 +173,10 @@ class FreebaseRetriever:
             # 沿着关系路径前进
             for relation in relation_path:
                 next_entities = []
-                for current_uri in current_uris[:3]:  # 限制分支数
-                    entities = self.follow_relation_from_uri(current_uri, relation, limit=10)
+                # 限制分支数避免组合爆炸，同时保证足够的覆盖率
+                # 每个URI最多扩展5条路径，每跳最多返回15个实体
+                for current_uri in current_uris[:5]:  # 增加到5个分支
+                    entities = self.follow_relation_from_uri(current_uri, relation, limit=15)
                     next_entities.extend(entities)
                 
                 if not next_entities:
@@ -506,13 +508,13 @@ def main():
     output_dir = "outputs/GRPO_Path_Reasoning_Indicator"
     run_name = "GRPO-Path-Reasoning-v1"
     
-    # 准备数据集
-    dataset = prepare_dataset(data_path, max_samples=1000)  # 先用1000条数据测试
+    # 准备数据集 - 使用全部数据
+    dataset = prepare_dataset(data_path, max_samples=None)
     
     # Wandb配置
     wandb_dir = os.path.join(output_dir, "wandb_logs")
     os.makedirs(wandb_dir, exist_ok=True)
-    os.environ["WANDB_MODE"] = os.environ.get("WANDB_MODE", "offline")
+    # os.environ["WANDB_MODE"] = os.environ.get("WANDB_MODE", "offline")
     os.environ["WANDB_DIR"] = wandb_dir
     
     # 训练配置
@@ -527,16 +529,16 @@ def main():
         lr_scheduler_type='cosine',
         logging_steps=1,
         bf16=True,
-        per_device_train_batch_size=8,  # 根据显存调整
-        gradient_accumulation_steps=8,
-        num_generations=8,  # 每个prompt生成4个候选
+        per_device_train_batch_size=1,  # 根据显存调整
+        gradient_accumulation_steps=2,
+        num_generations=2,  # 每个prompt生成1个候选
         max_prompt_length=512,
         max_completion_length=512,
         num_train_epochs=1,
         save_steps=100,
         max_grad_norm=0.1,
         report_to="wandb",
-        log_on_each_node=False,
+        log_on_each_node=False
     )
     
     # LoRA配置
