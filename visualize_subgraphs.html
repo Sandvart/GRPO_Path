@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Freebase Subgraph Visualization</title>
+    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+            color: #333;
+        }
+        h1 {
+            text-align: center;
+            color: #2c3e50;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .controls {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+            align-items: center;
+            flex-wrap: wrap;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 6px;
+            border: 1px solid #e9ecef;
+        }
+        select, button, input[type="file"] {
+            padding: 8px 12px;
+            border-radius: 4px;
+            border: 1px solid #ced4da;
+            font-size: 14px;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        #mynetwork {
+            width: 100%;
+            height: 600px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background-color: #fff;
+        }
+        #stats {
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #e9ecef;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .legend {
+            margin-top: 10px;
+            font-size: 12px;
+            color: #666;
+        }
+        .node-info {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            display: none;
+            max-width: 300px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            z-index: 100;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Freebase Subgraph Visualization</h1>
+        
+        <div class="controls">
+            <div>
+                <label for="fileInput">Upload JSON:</label>
+                <input type="file" id="fileInput" accept=".json" />
+            </div>
+            <span>OR</span>
+            <button id="loadDefaultBtn">Load 'freebase_subgraphs.json'</button>
+            
+            <div style="flex-grow: 1; text-align: right;">
+                <label for="subgraphSelect">Select Subgraph:</label>
+                <select id="subgraphSelect" disabled>
+                    <option value="">Please load data first...</option>
+                </select>
+            </div>
+        </div>
+
+        <div id="stats">No data loaded.</div>
+        
+        <div style="position: relative;">
+            <div id="mynetwork"></div>
+            <div id="nodeInfo" class="node-info"></div>
+        </div>
+        
+        <div class="legend">
+            <strong>Interaction:</strong> Scroll to zoom, Drag to pan, Click node to see details.
+        </div>
+    </div>
+
+    <script>
+        let network = null;
+        let allSubgraphs = [];
+
+        // DOM Elements
+        const fileInput = document.getElementById('fileInput');
+        const loadDefaultBtn = document.getElementById('loadDefaultBtn');
+        const subgraphSelect = document.getElementById('subgraphSelect');
+        const statsDiv = document.getElementById('stats');
+        const nodeInfoDiv = document.getElementById('nodeInfo');
+        const container = document.getElementById('mynetwork');
+
+        // Event Listeners
+        fileInput.addEventListener('change', handleFileUpload);
+        loadDefaultBtn.addEventListener('click', loadDefaultFile);
+        subgraphSelect.addEventListener('change', (e) => {
+            const index = e.target.value;
+            if (index !== "") {
+                visualizeSubgraph(allSubgraphs[index]);
+            }
+        });
+
+        // Handle File Upload
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    processData(data);
+                } catch (error) {
+                    alert('Error parsing JSON file: ' + error.message);
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        // Load Default File (assumes served from same directory)
+        function loadDefaultFile() {
+            fetch('freebase_subgraphs.json')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error("Cannot fetch file. If you are opening this HTML file directly, browser security prevents reading local files. Please use the 'Upload JSON' button instead.");
+                    }
+                    return response.json();
+                })
+                .then(data => processData(data))
+                .catch(error => alert(error.message));
+        }
+
+        // Process Data
+        function processData(data) {
+            if (!data.subgraphs || !Array.isArray(data.subgraphs)) {
+                alert('Invalid JSON format. Expected object with "subgraphs" array.');
+                return;
+            }
+
+            allSubgraphs = data.subgraphs;
+            
+            // Populate Select
+            subgraphSelect.innerHTML = '<option value="">Select a subgraph...</option>';
+            allSubgraphs.forEach((sg, index) => {
+                const option = document.createElement('option');
+                option.value = index;
+                const entityCount = new Set(sg.triples.flatMap(t => [t.head_entity, t.tail_entity])).size;
+                option.textContent = `ID: ${sg.subgraph_id} (${entityCount} entities, ${sg.triples.length} triples)`;
+                subgraphSelect.appendChild(option);
+            });
+            
+            subgraphSelect.disabled = false;
+            statsDiv.textContent = `Loaded ${allSubgraphs.length} subgraphs. Please select one to visualize.`;
+            
+            // Automatically select the first one
+            if (allSubgraphs.length > 0) {
+                subgraphSelect.value = 0;
+                visualizeSubgraph(allSubgraphs[0]);
+            }
+        }
+
+        // Visualize Subgraph
+        function visualizeSubgraph(subgraph) {
+            const nodes = new vis.DataSet();
+            const edges = new vis.DataSet();
+            const nodeSet = new Set();
+            const nodeTypes = {};
+
+            // Process triples
+            subgraph.triples.forEach((triple, index) => {
+                // Add Head Node
+                if (!nodeSet.has(triple.head_entity)) {
+                    nodes.add({
+                        id: triple.head_entity,
+                        label: triple.head_entity,
+                        title: `Type: ${triple.head_entity_type}`,
+                        group: triple.head_entity_type,
+                        value: 1 // Initial size
+                    });
+                    nodeSet.add(triple.head_entity);
+                    nodeTypes[triple.head_entity] = triple.head_entity_type;
+                } else {
+                    // Increase size for existing node
+                    const node = nodes.get(triple.head_entity);
+                    nodes.update({id: triple.head_entity, value: node.value + 1});
+                }
+
+                // Add Tail Node
+                if (!nodeSet.has(triple.tail_entity)) {
+                    nodes.add({
+                        id: triple.tail_entity,
+                        label: triple.tail_entity,
+                        title: `Type: ${triple.tail_entity_type}`,
+                        group: triple.tail_entity_type,
+                        value: 1
+                    });
+                    nodeSet.add(triple.tail_entity);
+                    nodeTypes[triple.tail_entity] = triple.tail_entity_type;
+                } else {
+                    const node = nodes.get(triple.tail_entity);
+                    nodes.update({id: triple.tail_entity, value: node.value + 1});
+                }
+
+                // Add Edge
+                edges.add({
+                    from: triple.head_entity,
+                    to: triple.tail_entity,
+                    label: triple.relation,
+                    arrows: 'to',
+                    font: { align: 'middle', size: 10 },
+                    color: { color: '#848484' }
+                });
+            });
+
+            // Calculate degrees for stats
+            let inDegrees = {};
+            let outDegrees = {};
+            nodeSet.forEach(n => { inDegrees[n] = 0; outDegrees[n] = 0; });
+            
+            subgraph.triples.forEach(t => {
+                outDegrees[t.head_entity]++;
+                inDegrees[t.tail_entity]++;
+            });
+
+            const zeroIn = Object.values(inDegrees).filter(d => d === 0).length;
+            const zeroOut = Object.values(outDegrees).filter(d => d === 0).length;
+
+            // Update Stats
+            statsDiv.innerHTML = `
+                <strong>Subgraph ID:</strong> ${subgraph.subgraph_id} <br>
+                <strong>Entities:</strong> ${nodeSet.size} | 
+                <strong>Triples:</strong> ${subgraph.triples.length} <br>
+                <strong>Zero In-Degree Nodes:</strong> ${zeroIn} | 
+                <strong>Zero Out-Degree Nodes:</strong> ${zeroOut}
+            `;
+
+            // Network Options
+            const options = {
+                nodes: {
+                    shape: 'dot',
+                    scaling: {
+                        min: 10,
+                        max: 30,
+                        label: {
+                            enabled: true,
+                            min: 14,
+                            max: 24
+                        }
+                    },
+                    font: {
+                        size: 14,
+                        face: 'Tahoma'
+                    }
+                },
+                edges: {
+                    smooth: {
+                        type: 'continuous'
+                    }
+                },
+                physics: {
+                    stabilization: false,
+                    barnesHut: {
+                        gravitationalConstant: -2000,
+                        springConstant: 0.04,
+                        springLength: 150
+                    }
+                },
+                interaction: {
+                    hover: true,
+                    tooltipDelay: 200
+                }
+            };
+
+            // Create Network
+            const data = { nodes: nodes, edges: edges };
+            if (network) {
+                network.destroy();
+            }
+            network = new vis.Network(container, data, options);
+
+            // Click Event
+            network.on("click", function (params) {
+                if (params.nodes.length > 0) {
+                    const nodeId = params.nodes[0];
+                    const nodeType = nodeTypes[nodeId];
+                    const inD = inDegrees[nodeId];
+                    const outD = outDegrees[nodeId];
+                    
+                    nodeInfoDiv.style.display = 'block';
+                    nodeInfoDiv.innerHTML = `
+                        <h3>${nodeId}</h3>
+                        <p><strong>Type:</strong> ${nodeType}</p>
+                        <p><strong>In-Degree:</strong> ${inD}</p>
+                        <p><strong>Out-Degree:</strong> ${outD}</p>
+                    `;
+                } else {
+                    nodeInfoDiv.style.display = 'none';
+                }
+            });
+        }
+    </script>
+</body>
+</html>
