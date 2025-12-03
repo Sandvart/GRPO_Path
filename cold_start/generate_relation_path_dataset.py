@@ -92,13 +92,13 @@ def generate_output(q_entities: List[str], relation_paths: Dict[str, List[List[s
     生成输出JSON字符串
     """
     output_dict = {
-        "问题实体": q_entities,
-        "关系路径": {}
+        "question_entities": q_entities,
+        "relation_paths": {}
     }
     
     for entity in q_entities:
         if entity in relation_paths and relation_paths[entity]:
-            output_dict["关系路径"][entity] = relation_paths[entity]
+            output_dict["relation_paths"][entity] = relation_paths[entity]
     
     # 转换为JSON字符串，保持格式
     return json.dumps(output_dict, ensure_ascii=False, indent=2)
@@ -107,7 +107,31 @@ def process_dataset(input_file: str, output_file: str):
     """
     处理数据集，生成新的任务数据
     """
-    instruction = "请从给定的问题中识别出所有涉及的实体，并为每个实体给出其到答案实体的所有关系路径集合。关系路径指的是从问题实体出发，经过一系列关系，最终到达答案实体的路径，每个问题实体可能对应多条不同的关系路径。\n\n注意：仅输出JSON内容，不要添加多余说明。"
+    instruction = """Given a question, identify the key entities that can serve as reasoning starting points to answer the question, and provide all relation paths from each question entity to the answer entities.
+
+Task Requirements:
+1. Identify question entities: Extract entities from the question that are helpful for answering it and can serve as reasoning starting points. These are NOT all entities mentioned in the question, but only those relevant to finding the answer.
+2. Use canonical entity names: Output the standardized/canonical names of entities, not their surface forms as they appear in the question.
+3. Find relation paths: For each question entity, find ALL shortest relation paths that lead to any answer entity.
+4. Path structure: A relation path is a sequence of relations connecting a question entity to an answer entity through the knowledge graph.
+5. Multiple paths: Each question entity may have multiple different relation paths, and there can be multiple question entities.
+
+Output Format:
+- Return ONLY a JSON object with no additional explanation
+- JSON structure: {"question_entities": [list of canonical entity names], "relation_paths": {entity: [[path1], [path2], ...]}}
+- Each path is a list of relation names in sequential order from question entity to answer entity
+- Use canonical entity names (standardized forms) in the output, not surface forms from the question
+
+Example Output:
+{
+  "question_entities": ["Entity1", "Entity2"],
+  "relation_paths": {
+    "Entity1": [["relation1", "relation2"], ["relation3"]],
+    "Entity2": [["relation4", "relation5", "relation6"]]
+  }
+}
+
+Note: Output JSON only, no additional text."""
     
     print(f"正在读取数据文件: {input_file}")
     with open(input_file, 'r', encoding='utf-8') as f:
@@ -147,6 +171,6 @@ def process_dataset(input_file: str, output_file: str):
 
 if __name__ == "__main__":
     input_file = "/Users/sandvart/Desktop/MyCode/GRPO_Path/datasets/webqsp/train.json"
-    output_file = "/Users/sandvart/Desktop/MyCode/GRPO_Path/cold_start/relation_path_dataset.json"
+    output_file = "/Users/sandvart/Desktop/MyCode/GRPO_Path/cold_start/rag_cold_start_dataset.json"
     
     process_dataset(input_file, output_file)
