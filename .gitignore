@@ -211,3 +211,5 @@ datasets/
 evaluation_results.json
 subgraph_extraction/freebase_subgraphs.json
 subgraph_extraction/output_体质辨识 copy.json
+old_files
+cold_start/relation_path_dataset.json
