@@ -1,9 +1,16 @@
 import os
+import json
 from datasets import load_dataset
 
-def download_and_save_dataset():
-    dataset_name = "rmanluo/RoG-webqsp"
-    base_output_dir = "datasets"
+def download_and_save_dataset(batch_size=10000):
+    """
+    下载并保存数据集
+    
+    Args:
+        batch_size: 每个JSON文件包含的数据条数，默认10000条
+    """
+    dataset_name = "rmanluo/RoG-cwq"
+    base_output_dir = "datasets/cwq"
     
     # 确保基础输出目录存在
     if not os.path.exists(base_output_dir):
@@ -25,20 +32,40 @@ def download_and_save_dataset():
         print(f"正在保存原始 Hugging Face 格式到: {raw_save_path}")
         dataset.save_to_disk(raw_save_path)
 
-        # 2. 遍历每个 split 并保存为 JSON 文件
+        # 2. 遍历每个 split 并保存为 JSON 文件（支持大文件拆分）
         print("正在转换并保存为 JSON 文件...")
         for split_name in dataset.keys():
             split_data = dataset[split_name]
+            total_count = len(split_data)
             
-            # 构建 JSON 文件路径
-            json_filename = f"{split_name}.json"
-            json_file_path = os.path.join(base_output_dir, json_filename)
+            print(f"\n处理 {split_name} split (共 {total_count} 条数据)")
             
-            # 保存为 JSON
-            # indent=2 使得 JSON 文件易于阅读
-            # 使用 to_pandas() 避免 datasets.to_json 的格式化问题
-            split_data.to_pandas().to_json(json_file_path, orient="records", lines=False, force_ascii=False, indent=2)
-            print(f"  - {split_name} split 已保存到: {json_file_path}")
+            # 如果数据量小于batch_size，直接保存为单个文件
+            if total_count <= batch_size:
+                json_filename = f"{split_name}.json"
+                json_file_path = os.path.join(base_output_dir, json_filename)
+                
+                split_data.to_pandas().to_json(json_file_path, orient="records", lines=False, force_ascii=False, indent=2)
+                print(f"  - {split_name} split 已保存到: {json_file_path}")
+            else:
+                # 数据量大，需要拆分保存
+                num_batches = (total_count + batch_size - 1) // batch_size
+                print(f"  数据量较大，将拆分为 {num_batches} 个文件（每个 {batch_size} 条）")
+                
+                for batch_idx in range(num_batches):
+                    start_idx = batch_idx * batch_size
+                    end_idx = min((batch_idx + 1) * batch_size, total_count)
+                    
+                    # 获取当前批次的数据
+                    batch_data = split_data.select(range(start_idx, end_idx))
+                    
+                    # 生成批次文件名
+                    json_filename = f"{split_name}_part{batch_idx + 1:03d}.json"
+                    json_file_path = os.path.join(base_output_dir, json_filename)
+                    
+                    # 保存为 JSON
+                    batch_data.to_pandas().to_json(json_file_path, orient="records", lines=False, force_ascii=False, indent=2)
+                    print(f"  - 批次 {batch_idx + 1}/{num_batches} 已保存到: {json_filename} (索引 {start_idx}-{end_idx-1})")
             
         print("\n所有操作完成！")
         print(f"文件保存在: {base_output_dir}")
@@ -47,4 +74,6 @@ def download_and_save_dataset():
         print(f"发生错误: {e}")
 
 if __name__ == "__main__":
-    download_and_save_dataset()
+    # 每10000条数据保存为一个JSON文件
+    # 可以根据需要调整batch_size参数
+    download_and_save_dataset(batch_size=2000)

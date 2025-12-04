@@ -217,3 +217,5 @@ cold_start/rag_cold_start_dataset.json
 evaluation_results_with_reasoning.json
 test_single_sample_result.json
 evaluation_results_with_reasoning_8b.json
+cold_start/rag_cold_start_dataset_cwq
+cold_start/rag_cold_start_dataset_webqsp.json

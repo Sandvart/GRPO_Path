@@ -1,7 +1,9 @@
 import json
+import os
 from collections import defaultdict, deque
 from typing import List, Dict, Set, Tuple
 from tqdm import tqdm
+from datasets import load_from_disk
 
 def find_shortest_paths(graph: List[List[str]], q_entities: List[str], a_entities: List[str]) -> Dict[str, List[List[str]]]:
     """
@@ -103,9 +105,15 @@ def generate_output(q_entities: List[str], relation_paths: Dict[str, List[List[s
     # 转换为JSON字符串，保持格式
     return json.dumps(output_dict, ensure_ascii=False, indent=2)
 
-def process_dataset(input_file: str, output_file: str):
+def process_dataset(input_dir: str, output_file: str, batch_size: int = 2000):
     """
     处理数据集，生成新的任务数据
+    从Hugging Face原始格式读取，分批保存输出
+    
+    Args:
+        input_dir: 输入目录路径（raw_hf/train）
+        output_file: 输出文件路径（会在文件名中插入批次编号）
+        batch_size: 每个批次的数据量，默认2000条
     """
     instruction = """Given a question, identify the key entities that can serve as reasoning starting points to answer the question, and provide all relation paths from each question entity to the answer entities.
 
@@ -133,44 +141,71 @@ Example Output:
 
 Note: Output JSON only, no additional text."""
     
-    print(f"正在读取数据文件: {input_file}")
-    with open(input_file, 'r', encoding='utf-8') as f:
-        data = json.load(f)
+    print(f"正在从 Hugging Face 格式加载数据: {input_dir}")
+    dataset = load_from_disk(input_dir)
     
-    print(f"共读取 {len(data)} 条数据")
+    total_count = len(dataset)
+    print(f"共加载 {total_count} 条数据")
+    print(f"将按每 {batch_size} 条数据分批处理和保存")
     
-    output_data = []
+    # 计算批次数量
+    num_batches = (total_count + batch_size - 1) // batch_size
+    print(f"预计生成 {num_batches} 个输出文件")
     
-    for idx, item in enumerate(tqdm(data, desc="处理数据", unit="条")):
-        question = item.get('question', '')
-        q_entities = item.get('q_entity', [])
-        a_entities = item.get('a_entity', [])
-        graph = item.get('graph', [])
+    # 准备输出文件名模板
+    output_dir = os.path.dirname(output_file)
+    output_basename = os.path.basename(output_file)
+    output_name, output_ext = os.path.splitext(output_basename)
+    
+    # 分批处理
+    for batch_idx in range(num_batches):
+        start_idx = batch_idx * batch_size
+        end_idx = min((batch_idx + 1) * batch_size, total_count)
         
-        # 找到最短路径
-        relation_paths = find_shortest_paths(graph, q_entities, a_entities)
+        print(f"\n处理批次 {batch_idx + 1}/{num_batches} (索引 {start_idx}-{end_idx-1}, 共 {end_idx - start_idx} 条)")
         
-        # 生成输出
-        output_str = generate_output(q_entities, relation_paths)
+        output_batch = []
         
-        # 构造新的数据项
-        new_item = {
-            "instruction": instruction,
-            "input": question,
-            "output": output_str
-        }
+        # 处理当前批次的数据
+        for idx in tqdm(range(start_idx, end_idx), desc=f"批次 {batch_idx + 1}", unit="条"):
+            item = dataset[idx]
+            
+            question = item.get('question', '')
+            q_entities = item.get('q_entity', [])
+            a_entities = item.get('a_entity', [])
+            graph = item.get('graph', [])
+            
+            # 找到最短路径
+            relation_paths = find_shortest_paths(graph, q_entities, a_entities)
+            
+            # 生成输出
+            output_str = generate_output(q_entities, relation_paths)
+            
+            # 构造新的数据项
+            new_item = {
+                "instruction": instruction,
+                "input": question,
+                "output": output_str
+            }
+            
+            output_batch.append(new_item)
         
-        output_data.append(new_item)
+        # 生成批次输出文件名
+        batch_output_file = os.path.join(output_dir, f"{output_name}_part{batch_idx + 1:03d}{output_ext}")
+        
+        # 保存当前批次结果
+        print(f"正在保存批次 {batch_idx + 1} 到: {batch_output_file}")
+        with open(batch_output_file, 'w', encoding='utf-8') as f:
+            json.dump(output_batch, f, ensure_ascii=False, indent=2)
+        
+        print(f"批次 {batch_idx + 1} 完成！生成 {len(output_batch)} 条数据")
     
-    # 保存结果
-    print(f"正在保存到: {output_file}")
-    with open(output_file, 'w', encoding='utf-8') as f:
-        json.dump(output_data, f, ensure_ascii=False, indent=2)
-    
-    print(f"完成！共生成 {len(output_data)} 条数据")
+    print(f"\n全部完成！共处理 {total_count} 条数据，生成 {num_batches} 个文件")
 
 if __name__ == "__main__":
-    input_file = "/Users/sandvart/Desktop/MyCode/GRPO_Path/datasets/webqsp/train.json"
-    output_file = "/Users/sandvart/Desktop/MyCode/GRPO_Path/cold_start/rag_cold_start_dataset.json"
+    # 从raw_hf/train目录读取原始Hugging Face格式数据
+    input_dir = "/Users/sandvart/Desktop/MyCode/GRPO_Path/datasets/cwq/raw_hf/train"
+    output_file = "/Users/sandvart/Desktop/MyCode/GRPO_Path/cold_start/rag_cold_start_dataset_cwq.json"
     
-    process_dataset(input_file, output_file)
+    # 每2000条数据保存为一个文件
+    process_dataset(input_dir, output_file, batch_size=2000)
