@@ -626,7 +626,7 @@ def main():
     # 配置参数 - 推理指示器生成模型的API
     REASONING_API_KEY = ""  # 替换为推理模型的API密钥
     REASONING_BASE_URL = "http://10.201.173.146:8003/v1"  # 替换为推理模型的API地址
-    REASONING_MODEL = "/data/shahy/models/SFT/GRPO_Path_cold_start_3.0"  # 替换为训练后的推理指示器生成模型名称
+    REASONING_MODEL = "/data/shahy/models/SFT/GRPO_Path_cold_start_3.0_1.7b"  # 替换为训练后的推理指示器生成模型名称
     
     # 配置参数 - 答案生成模型的API
     ANSWER_API_KEY = "sk-96f7de02e5644f29a4e2192f59ff3e47"

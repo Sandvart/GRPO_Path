@@ -5,8 +5,15 @@ GRPO训练代码 - 关系路径推理指示器任务
 奖励函数:
 1. 格式奖励: 输出符合JSON格式要求
 2. 关系存在奖励: 关系在Freebase中存在的比例
-3. 检索奖励: 能检索到任意实体加分，检索到答案实体加大分
+3. 路径有效性奖励: 能沿着关系路径检索到任意实体
+4. 答案检索奖励: 能检索到答案实体
 """
+
+# watch -n 1 nvidia-smi
+
+# wandb sync 
+
+# nohup python train_grpo.py &
 
 import os
 import json
@@ -21,7 +28,7 @@ from SPARQLWrapper import SPARQLWrapper, JSON as SPARQL_JSON
 from importlib.util import find_spec
 
 # 环境配置
-os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 os.environ["NCCL_P2P_DISABLE"] = "1"
 os.environ["NCCL_IB_DISABLE"] = "1"
 
@@ -161,6 +168,14 @@ class FreebaseRetriever:
             - can_retrieve_any: 是否能检索到任意实体
             - can_retrieve_answer: 是否能检索到答案实体
         """
+        # 标准化答案实体列表（处理可能的嵌套列表）
+        normalized_answers = []
+        for item in answer_entities:
+            if isinstance(item, list):
+                normalized_answers.extend(item)
+            elif isinstance(item, str):
+                normalized_answers.append(item)
+        
         # 获取起始实体URI
         entity_uris = self.get_entity_uris(start_entity, limit=5)
         if not entity_uris:
@@ -188,7 +203,7 @@ class FreebaseRetriever:
                 if relation == relation_path[-1]:
                     can_retrieve_any = len(current_uris) > 0
                     can_retrieve_answer = any(
-                        entity.lower() in [a.lower() for a in answer_entities]
+                        entity.lower() in [a.lower() for a in normalized_answers]
                         for entity in current_uris
                     )
                     return can_retrieve_any, can_retrieve_answer
@@ -415,12 +430,11 @@ def relation_existence_reward_func(completions, **kwargs) -> List[float]:
     return rewards
 
 
-def retrieval_reward_func(completions, answer, **kwargs) -> List[float]:
+def path_validity_reward_func(completions, answer, **kwargs) -> List[float]:
     """
-    奖励函数3: 检索奖励
-    基于推理指示器能否检索到实体来给分
-    - 能检索到任意实体: +1分
-    - 能检索到答案实体: +3分
+    奖励函数3: 路径有效性奖励
+    检查推理指示器能否沿着关系路径检索到任意实体
+    - 能检索到任意实体: +2分
     """
     rewards = []
     for completion in completions:
@@ -440,6 +454,62 @@ def retrieval_reward_func(completions, answer, **kwargs) -> List[float]:
         
         # 尝试检索
         can_retrieve_any = False
+        
+        for entity in question_entities:
+            if entity not in relation_paths:
+                continue
+            
+            entity_paths = relation_paths[entity]
+            if not isinstance(entity_paths, list):
+                continue
+            
+            for path in entity_paths:
+                if not isinstance(path, list) or len(path) == 0:
+                    continue
+                
+                # 检查能否检索到任意实体
+                answer_entities = answer if isinstance(answer, list) else [answer]
+                retrieve_any, _ = retriever.can_retrieve_path(
+                    entity, path, answer_entities
+                )
+                
+                if retrieve_any:
+                    can_retrieve_any = True
+                    break
+            
+            if can_retrieve_any:
+                break
+        
+        # 计算奖励
+        reward = 2.0 if can_retrieve_any else 0.0
+        rewards.append(reward)
+    
+    return rewards
+
+
+def answer_retrieval_reward_func(completions, answer, **kwargs) -> List[float]:
+    """
+    奖励函数4: 答案检索奖励
+    检查推理指示器能否检索到答案实体
+    - 能检索到答案实体: +3分
+    """
+    rewards = []
+    for completion in completions:
+        content = completion[0]['content']
+        parsed = extract_json_from_response(content)
+        
+        if parsed is None:
+            rewards.append(0.0)
+            continue
+        
+        question_entities = parsed.get('question_entities', [])
+        relation_paths = parsed.get('relation_paths', {})
+        
+        if not question_entities or not relation_paths:
+            rewards.append(0.0)
+            continue
+        
+        # 尝试检索
         can_retrieve_answer = False
         
         for entity in question_entities:
@@ -454,13 +524,12 @@ def retrieval_reward_func(completions, answer, **kwargs) -> List[float]:
                 if not isinstance(path, list) or len(path) == 0:
                     continue
                 
-                # 检查能否检索
-                retrieve_any, retrieve_answer = retriever.can_retrieve_path(
-                    entity, path, answer[0] if isinstance(answer, list) else [answer]
+                # 检查能否检索到答案实体
+                answer_entities = answer if isinstance(answer, list) else [answer]
+                _, retrieve_answer = retriever.can_retrieve_path(
+                    entity, path, answer_entities
                 )
                 
-                if retrieve_any:
-                    can_retrieve_any = True
                 if retrieve_answer:
                     can_retrieve_answer = True
                     break
@@ -469,12 +538,7 @@ def retrieval_reward_func(completions, answer, **kwargs) -> List[float]:
                 break
         
         # 计算奖励
-        reward = 0.0
-        if can_retrieve_any:
-            reward += 1.0
-        if can_retrieve_answer:
-            reward += 3.0
-        
+        reward = 3.0 if can_retrieve_answer else 0.0
         rewards.append(reward)
     
     return rewards
@@ -482,8 +546,8 @@ def retrieval_reward_func(completions, answer, **kwargs) -> List[float]:
 
 def correctness_reward_func(completions, answer, question, **kwargs) -> List[float]:
     """
-    奖励函数4: 正确性奖励（组合奖励）
-    综合评估推理指示器的质量
+    奖励函数5: 正确性奖励（调试用）
+    用于打印样例调试信息
     """
     responses = [completion[0]['content'] for completion in completions]
     
@@ -502,7 +566,7 @@ def correctness_reward_func(completions, answer, question, **kwargs) -> List[flo
 
 def main():
     # 配置参数
-    model_name = "/data/shahy/models/SFT/GRPO_Path_cold_start_3.0"  # 初步训练过的模型
+    model_name = "/data/shahy/models/SFT/GRPO_Path_cold_start_3.0_qwen2.5_1.5b"  # 初步训练过的模型
     data_path = "datasets/webqsp/train.json"
     
     output_dir = "outputs/GRPO_Path_Reasoning_Indicator"
@@ -529,9 +593,9 @@ def main():
         lr_scheduler_type='cosine',
         logging_steps=1,
         bf16=True,
-        per_device_train_batch_size=1,  # 根据显存调整
-        gradient_accumulation_steps=2,
-        num_generations=2,  # 每个prompt生成1个候选
+        per_device_train_batch_size=4,  # 根据显存调整
+        gradient_accumulation_steps=4,
+        num_generations=4,  # 每个prompt生成4个候选
         max_prompt_length=512,
         max_completion_length=512,
         num_train_epochs=1,
@@ -562,8 +626,19 @@ def main():
         device_map=None
     ).to("cuda")
     
+    # # 配置生成参数，禁用思考模式
+    # if hasattr(model, 'generation_config'):
+    #     # model.generation_config.temperature = 0.7
+    #     # model.generation_config.top_p = 0.8
+    #     # model.generation_config.enable_thinking = False
+    #     model.generation_config.chat_template_kwargs = {"enable_thinking": False}
+    
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     tokenizer.pad_token = tokenizer.eos_token
+    
+    # # 在tokenizer中也设置chat_template_kwargs
+    # if hasattr(tokenizer, 'chat_template_kwargs'):
+    #     tokenizer.chat_template_kwargs = {"enable_thinking": False}
     
     # 创建训练器
     print("创建GRPO训练器...")
@@ -571,10 +646,11 @@ def main():
         model=model,
         processing_class=tokenizer,
         reward_funcs=[
-            format_reward_func,           # 格式奖励 (最高1分)
+            format_reward_func,              # 格式奖励 (最高1分)
             relation_existence_reward_func,  # 关系存在奖励 (最高2分)
-            retrieval_reward_func,        # 检索奖励 (最高4分)
-            correctness_reward_func,      # 调试用
+            path_validity_reward_func,       # 路径有效性奖励 (最高2分)
+            answer_retrieval_reward_func,    # 答案检索奖励 (最高3分)
+            correctness_reward_func,         # 调试用
         ],
         args=training_args,
         train_dataset=dataset,

@@ -284,8 +284,7 @@ Note: Output JSON only, no additional text."""
             "question_entities": ["Justin Bieber"],
             "relation_paths": {
                 "Justin Bieber": [
-                    ["people.person.parents", "people.person.children"],
-                    ["people.person.sibling_s", "people.siblings.sibling"],
+                    ["people.person.parents"]
                 ]
             }
         }
