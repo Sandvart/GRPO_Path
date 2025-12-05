@@ -302,7 +302,7 @@ def test_combined_rewards():
         }
     })
     
-    answer = ["Pattie Mallette", "Jeremy Bieber"]
+    answer = ["Pattie Mallette", "Jeremy Bieber","shyne lukas"]  # 故意添加一个错误答案以测试部分奖励
     completions = create_mock_completion(test_response)
     
     print("\n测试响应:")

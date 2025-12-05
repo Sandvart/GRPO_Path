@@ -4,5 +4,9 @@ CUDA_VISIBLE_DEVICES=0,1 vllm serve /data/shahy/models/Qwen/Qwen3-8B --device cu
 
 CUDA_VISIBLE_DEVICES=0 vllm serve /data/shahy/models/SFT/GRPO_Path_cold_start_3.0_1.7b --device cuda --port 8003 --gpu-memory-utilization 0.98 --max-model-len 8196
 CUDA_VISIBLE_DEVICES=0 vllm serve /data/shahy/models/SFT/GRPO_Path_cold_start_3.0_qwen2.5_1.5b --device cuda --port 8003 --gpu-memory-utilization 0.98 --max-model-len 8196
+CUDA_VISIBLE_DEVICES=0 vllm serve /data/shahy/models/SFT/GRPO_Path_cold_start_3.0_qwen2.5_1.5b_cwq --device cuda --port 8003 --gpu-memory-utilization 0.98 --max-model-len 8196
 CUDA_VISIBLE_DEVICES=0 vllm serve /home/shahy/GRPO_test/outputs/GRPO_Path_Reasoning_Indicator_webqsp_1.5b/final_model --device cuda --port 8003 --gpu-memory-utilization 0.98 --max-model-len 8196 --config-format hf --load-format pt
+
+
+
 CUDA_VISIBLE_DEVICES=0,2 vllm serve /data/shahy/models/SFT/GRPO_Path_cold_start_3.0_qwen2.5_1.5b --device cuda --port 8003 --gpu-memory-utilization 0.98 --max-model-len 4000 --tensor-parallel-size 2

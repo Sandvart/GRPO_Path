@@ -242,61 +242,93 @@ def prepare_dataset(data_path: str, split: str = "train", max_samples: int = Non
     """准备训练数据集"""
     print(f"正在加载数据: {data_path}")
     
-    # 尝试多种方式加载数据
-    data = None
-    
-    # 方法1: 标准JSON加载
-    try:
-        with open(data_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        print(f"✓ 成功使用标准JSON加载")
-    except json.JSONDecodeError as e:
-        print(f"✗ 标准JSON加载失败: {e}")
-        print("尝试逐行加载JSONL格式...")
-        
-        # 方法2: 尝试JSONL格式（每行一个JSON对象）
+    # 检查路径类型
+    if os.path.isdir(data_path):
+        # 从Hugging Face格式加载
+        print(f"检测到目录，尝试从Hugging Face格式加载...")
         try:
+            dataset_dict = load_from_disk(data_path)
+            if split in dataset_dict:
+                hf_dataset = dataset_dict[split]
+            else:
+                # 如果没有指定split，使用第一个可用的split
+                available_splits = list(dataset_dict.keys())
+                print(f"可用的splits: {available_splits}")
+                if available_splits:
+                    hf_dataset = dataset_dict[available_splits[0]]
+                    print(f"使用split: {available_splits[0]}")
+                else:
+                    raise RuntimeError("数据集中没有可用的split")
+            
+            print(f"✓ 成功从HF格式加载 {len(hf_dataset)} 条数据")
+            
+            # 转换为列表格式
             data = []
-            with open(data_path, 'r', encoding='utf-8') as f:
-                for line_num, line in enumerate(f, 1):
-                    line = line.strip()
-                    if line:
-                        try:
-                            data.append(json.loads(line))
-                        except json.JSONDecodeError:
-                            if line_num <= 10:  # 只报告前10个错误
-                                print(f"警告: 第{line_num}行解析失败")
-                            continue
-                    
-                    # 如果指定了max_samples且已经加载足够，提前停止
-                    if max_samples and len(data) >= max_samples:
-                        break
+            for item in hf_dataset:
+                data.append({
+                    'question': item.get('question', ''),
+                    'answer': item.get('answer', [])
+                })
             
-            if data:
-                print(f"✓ 成功逐行加载 {len(data)} 条数据")
         except Exception as e:
-            print(f"✗ 逐行加载也失败: {e}")
+            print(f"✗ HF格式加载失败: {e}")
+            raise RuntimeError(f"无法从目录加载数据: {data_path}")
+    else:
+        # 从JSON文件加载
+        data = None
+        
+        # 方法1: 标准JSON加载
+        try:
+            with open(data_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            print(f"✓ 成功使用标准JSON加载")
+        except json.JSONDecodeError as e:
+            print(f"✗ 标准JSON加载失败: {e}")
+            print("尝试逐行加载JSONL格式...")
             
-            # 方法3: 尝试分块加载（只加载部分数据）
-            print("尝试分块加载...")
+            # 方法2: 尝试JSONL格式（每行一个JSON对象）
             try:
                 data = []
                 with open(data_path, 'r', encoding='utf-8') as f:
-                    content = f.read(10 * 1024 * 1024)  # 读取前10MB
-                    # 尝试找到完整的JSON数组
-                    if content.startswith('['):
-                        # 找到最后一个完整的对象
-                        last_brace = content.rfind('}')
-                        if last_brace > 0:
-                            content = content[:last_brace+1] + ']'
-                            data = json.loads(content)
-                            print(f"✓ 成功分块加载 {len(data)} 条数据")
+                    for line_num, line in enumerate(f, 1):
+                        line = line.strip()
+                        if line:
+                            try:
+                                data.append(json.loads(line))
+                            except json.JSONDecodeError:
+                                if line_num <= 10:  # 只报告前10个错误
+                                    print(f"警告: 第{line_num}行解析失败")
+                                continue
+                        
+                        # 如果指定了max_samples且已经加载足够，提前停止
+                        if max_samples and len(data) >= max_samples:
+                            break
+                
+                if data:
+                    print(f"✓ 成功逐行加载 {len(data)} 条数据")
             except Exception as e:
-                print(f"✗ 分块加载失败: {e}")
-                raise RuntimeError(f"无法加载数据文件 {data_path}，请检查文件格式")
-    
-    if not data:
-        raise RuntimeError(f"数据加载失败: {data_path}")
+                print(f"✗ 逐行加载也失败: {e}")
+                
+                # 方法3: 尝试分块加载（只加载部分数据）
+                print("尝试分块加载...")
+                try:
+                    data = []
+                    with open(data_path, 'r', encoding='utf-8') as f:
+                        content = f.read(10 * 1024 * 1024)  # 读取前10MB
+                        # 尝试找到完整的JSON数组
+                        if content.startswith('['):
+                            # 找到最后一个完整的对象
+                            last_brace = content.rfind('}')
+                            if last_brace > 0:
+                                content = content[:last_brace+1] + ']'
+                                data = json.loads(content)
+                                print(f"✓ 成功分块加载 {len(data)} 条数据")
+                except Exception as e:
+                    print(f"✗ 分块加载失败: {e}")
+                    raise RuntimeError(f"无法加载数据文件 {data_path}，请检查文件格式")
+        
+        if not data:
+            raise RuntimeError(f"数据加载失败: {data_path}")
     
     print(f"原始数据条数: {len(data)}")
     
@@ -317,7 +349,7 @@ def prepare_dataset(data_path: str, split: str = "train", max_samples: int = Non
             processed_data.append({
                 'prompt': [
                     {'role': 'system', 'content': 'You are a helpful assistant specialized in knowledge graph reasoning.'},
-                    {'role': 'user', 'content': f"{INSTRUCTION}\n\nQuestion: {question}"}
+                    {'role': 'user', 'content': f"{INSTRUCTION}\n\nQuestion: {question}\n/no_think"}
                 ],
                 'question': question,
                 'answer': answer
@@ -339,8 +371,28 @@ def prepare_dataset(data_path: str, split: str = "train", max_samples: int = Non
 retriever = FreebaseRetriever(SPARQLPATH)
 
 
+def clean_response(text: str) -> str:
+    """
+    清理响应文本，去除 <think> 标签及其内容
+    
+    Args:
+        text: 原始响应文本
+    
+    Returns:
+        清理后的文本
+    """
+    # 去除 <think>...</think> 标签及其内容
+    cleaned = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
+    # 去除可能的空白行
+    cleaned = cleaned.strip()
+    return cleaned
+
+
 def extract_json_from_response(text: str) -> Dict | None:
     """从响应中提取JSON"""
+    # 首先清理响应文本
+    text = clean_response(text)
+    
     try:
         # 尝试直接解析
         return json.loads(text)
@@ -553,10 +605,12 @@ def correctness_reward_func(completions, answer, question, **kwargs) -> List[flo
     
     # 打印第一个样例用于调试
     if responses:
+        # 清理响应以便更好地展示
+        cleaned_response = clean_response(responses[0])
         print('-'*80)
         print(f"Question: {question[0] if isinstance(question, list) else question}")
         print(f"Answer: {answer[0] if isinstance(answer, list) else answer}")
-        print(f"Response: {responses[0][:500]}...")  # 只打印前500字符
+        print(f"Response (cleaned): {cleaned_response[:500]}...")  # 只打印前500字符
         print('-'*80)
     
     return [0.0] * len(completions)  # 不额外加分，由其他奖励函数组合
@@ -566,10 +620,10 @@ def correctness_reward_func(completions, answer, question, **kwargs) -> List[flo
 
 def main():
     # 配置参数
-    model_name = "/data/shahy/models/SFT/GRPO_Path_cold_start_3.0_qwen2.5_1.5b"  # 初步训练过的模型
-    data_path = "datasets/webqsp/train.json"
+    model_name = "/data/shahy/models/SFT/GRPO_Path_cold_start_3.0_1.7b"  # 初步训练过的模型
+    data_path = "datasets/webqsp/raw_hf"  # 从原始HF格式数据集读取
     
-    output_dir = "outputs/GRPO_Path_Reasoning_Indicator"
+    output_dir = "outputs/GRPO_Path_Reasoning_Indicator_webqsp_1.7b"
     run_name = "GRPO-Path-Reasoning-v1"
     
     # 准备数据集 - 使用全部数据
