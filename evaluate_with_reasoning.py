@@ -444,6 +444,7 @@ Note: Output JSON only, no additional text."""
         hits = 0
         total_f1 = 0.0
         questions_with_paths = 0  # 记录检索到推理路径的问题数量
+        questions_reach_answer = 0  # 记录到达答案实体的问题数量
         
         for idx, sample in enumerate(tqdm(samples, desc="评测进度")):
             question = sample['question']
@@ -478,6 +479,19 @@ Note: Output JSON only, no additional text."""
             # 统计是否检索到推理路径
             if len(retrieved_paths) > 0:
                 questions_with_paths += 1
+            
+            # 检查是否有路径到达答案实体
+            reach_answer = False
+            if retrieved_paths:
+                for path_info in retrieved_paths:
+                    if path_info['reasoning_chain']:
+                        final_entity = path_info['reasoning_chain'][-1]['object']
+                        if final_entity in ground_truth:
+                            reach_answer = True
+                            break
+            
+            if reach_answer:
+                questions_reach_answer += 1
             
             # 显示检索到的推理路径详情
             if retrieved_paths:
@@ -531,12 +545,15 @@ Note: Output JSON only, no additional text."""
         hit_rate = hits / len(samples) if samples else 0
         avg_f1 = total_f1 / len(samples) if samples else 0
         path_retrieval_rate = questions_with_paths / len(samples) if samples else 0
+        answer_reach_rate = questions_reach_answer / len(samples) if samples else 0
         
         print(f"\n{'='*80}")
         print("评测结果汇总:")
         print(f"总样本数: {len(samples)}")
         print(f"检索到推理路径的问题数: {questions_with_paths}")
         print(f"推理路径检索率: {path_retrieval_rate:.4f} ({path_retrieval_rate*100:.2f}%)")
+        print(f"到达答案实体的问题数: {questions_reach_answer}")
+        print(f"答案实体到达率: {answer_reach_rate:.4f} ({answer_reach_rate*100:.2f}%)")
         print(f"命中数: {hits}")
         print(f"命中率: {hit_rate:.4f} ({hit_rate*100:.2f}%)")
         print(f"平均F1分数: {avg_f1:.4f}")
@@ -547,6 +564,8 @@ Note: Output JSON only, no additional text."""
                 'total_samples': len(samples),
                 'questions_with_paths': questions_with_paths,
                 'path_retrieval_rate': path_retrieval_rate,
+                'questions_reach_answer': questions_reach_answer,
+                'answer_reach_rate': answer_reach_rate,
                 'hits': hits,
                 'hit_rate': hit_rate,
                 'average_f1': avg_f1
